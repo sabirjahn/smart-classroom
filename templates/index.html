@@ -52,19 +52,7 @@
                                 <label for="subject" class="form-label">Subject:</label>
                                 <input type="text" class="form-control" id="subject" name="subject" placeholder="Enter subject name" required>
                             </div>
-                            
-                            <div class="form-group mb-3">
-                                <label for="camera_index" class="form-label">Select Camera:</label>
-                                <select class="form-select" id="camera_index" name="camera_index">
-                                    {% for camera in cameras %}
-                                        <option value="{{ camera }}">Camera {{ camera }}</option>
-                                    {% endfor %}
-                                    {% if not cameras %}
-                                        <option value="0">Default Camera</option>
-                                    {% endif %}
-                                </select>
-                            </div>
-                            
+
                             <div class="d-grid gap-2 mt-4">
                                 <button type="submit" name="start_class" class="btn btn-success btn-lg">
                                     <i class="fas fa-play-circle me-2"></i>Start New Class
@@ -318,7 +306,6 @@
         function continueClass(classId, subject, teacherId) {
             // Set cookies for the existing class
             document.cookie = `class_id=${classId}; path=/`;
-            document.cookie = `camera_index=0; path=/`;
             
             // Show loading
             showToast(`Continuing class: ${subject}`, 'info');

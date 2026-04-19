@@ -2,10 +2,10 @@ from flask import Flask, request, render_template, redirect, url_for, jsonify, m
 from datetime import datetime
 import emotions
 import cv2
+import base64
+import numpy as np
 import os
 import json
-import threading
-import time
 from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, DateTime, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
@@ -14,10 +14,6 @@ from collections import Counter
 import hashlib
 
 app = Flask(__name__)
-
-# Global camera object for video streaming
-camera = None
-camera_lock = threading.Lock()
 
 # Ensure we have an absolute path for the database
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -109,28 +105,6 @@ try:
     print("Database tables created successfully")
 except Exception as e:
     print(f"Error creating database tables: {str(e)}")
-
-# Get available cameras
-def get_available_cameras():
-    available_cameras = []
-    try:
-        # Only check camera 0 to avoid obsensor errors
-        cap = cv2.VideoCapture(0)
-        if cap.isOpened():
-            ret, frame = cap.read()
-            if ret:
-                available_cameras.append(0)
-                print("Camera 0 detected and working")
-        cap.release()
-    except Exception as e:
-        print(f"Error detecting cameras: {str(e)}")
-    
-    # Always include at least camera 0 as fallback
-    if not available_cameras:
-        available_cameras.append(0)
-        print("Using camera 0 as fallback")
-    
-    return available_cameras
 
 # Emotion information for insights
 emotion_info = {
@@ -259,8 +233,7 @@ def quickstart():
     if request.method == 'POST':
         teacher_id = request.form.get('teacher_id') or 'QuickStart'
         subject = request.form.get('subject')
-        camera_index = int(request.form.get('camera_index', 0))
-        
+
         try:
             # Create new class in database with exact timestamp
             session = Session()
@@ -275,36 +248,31 @@ def quickstart():
             session.commit()
             class_id = new_class.id
             session.close()
-            
+
             # Redirect to class page with cookies
             response = redirect(url_for('class_view'))
             response.set_cookie('class_id', str(class_id))
-            response.set_cookie('camera_index', str(camera_index))
             response.set_cookie('teacher_id', teacher_id)  # Set for quick start
             return response
         except Exception as e:
             print(f"Error creating class: {str(e)}")
-            # Return to quickstart page with error
-            cameras = get_available_cameras()
-            return render_template('quickstart.html', cameras=cameras, error="Database error. Please try again.")
-    
-    cameras = get_available_cameras()
-    return render_template('quickstart.html', cameras=cameras)
+            return render_template('quickstart.html', error="Database error. Please try again.")
+
+    return render_template('quickstart.html')
 
 @app.route('/', methods=['GET', 'POST'])
 def home():
     # Check if user is already logged in
     teacher_id = request.cookies.get('teacher_id')
-    
+
     if request.method == 'POST':
         if 'start_class' in request.form:
             # Must be logged in to start a class from home
             if not teacher_id:
                 return redirect(url_for('login'))
-            
+
             subject = request.form.get('subject')
-            camera_index = int(request.form.get('camera_index', 0))
-            
+
             try:
                 # Create new class in database with exact timestamp
                 session = Session()
@@ -319,25 +287,20 @@ def home():
                 session.commit()
                 class_id = new_class.id
                 session.close()
-                
+
                 # Redirect to class page with cookies
                 response = redirect(url_for('class_view'))
                 response.set_cookie('class_id', str(class_id))
-                response.set_cookie('camera_index', str(camera_index))
                 return response
             except Exception as e:
                 print(f"Error creating class: {str(e)}")
-                # Return to home page with error
-                cameras = get_available_cameras()
-                return render_template('index.html', cameras=cameras, error="Database error. Please try again.")
-    
+                return render_template('index.html', error="Database error. Please try again.")
+
     # Redirect to login if not logged in
     if not teacher_id:
         return redirect(url_for('login'))
-    
-    # Get list of available cameras
-    cameras = get_available_cameras()
-    return render_template('index.html', cameras=cameras)
+
+    return render_template('index.html')
 
 # Helper functions for emotion display
 @app.context_processor
@@ -381,11 +344,10 @@ def utility_processor():
 @app.route('/class', methods=['GET'])
 def class_view():
     class_id = request.cookies.get('class_id')
-    camera_index = request.cookies.get('camera_index', 0)
-    
+
     class_info = None
     readings = []
-    
+
     try:
         session = Session()
         if class_id:
@@ -395,10 +357,9 @@ def class_view():
     except Exception as e:
         print(f"Error retrieving class data: {str(e)}")
     
-    return render_template('class.html', 
-                         class_info=class_info, 
-                         readings=readings, 
-                         camera_index=camera_index,
+    return render_template('class.html',
+                         class_info=class_info,
+                         readings=readings,
                          emotion_info=emotion_info)
 
 @app.route('/students', methods=['GET', 'POST'])
@@ -626,19 +587,38 @@ def attendance(class_id):
 @app.route('/capture_emotion', methods=['POST'])
 def capture_emotion():
     class_id = request.cookies.get('class_id')
-    camera_index = int(request.cookies.get('camera_index', 0))
-    
-    print(f"Capture emotion request - Class ID: {class_id}, Camera: {camera_index}")
-    
+
+    print(f"Capture emotion request - Class ID: {class_id}")
+
     if not class_id:
         return jsonify({'status': 'error', 'message': 'No active class session found'})
-    
-    # Capture and analyze emotion (try stream camera first)
-    result = emotions.detect_emotion_detailed(camera_index, use_stream_camera=True)
-    
+
+    # Decode base64 image sent from the frontend
+    data = request.get_json(silent=True)
+    if not data or 'image' not in data:
+        return jsonify({'status': 'error', 'message': 'No image data provided'})
+
+    try:
+        image_data = data['image']
+        # Strip the data URL prefix (e.g. "data:image/jpeg;base64,")
+        if ',' in image_data:
+            image_data = image_data.split(',', 1)[1]
+        image_bytes = base64.b64decode(image_data)
+        nparr = np.frombuffer(image_bytes, np.uint8)
+        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+        if frame is None:
+            return jsonify({'status': 'error', 'message': 'Failed to decode image: the decoded frame is empty. Please ensure a valid image is being sent.'})
+    except Exception as e:
+        print(f"Image decode error: {str(e)}")
+        return jsonify({'status': 'error', 'message': 'Failed to decode image. Please try again.'})
+
+    # Analyze emotion from the decoded frame
+    result = emotions.detect_emotion_detailed(frame)
+
     print(f"Emotion detection result: {result}")
-    
-    if result and class_id:
+
+    if result:
         try:
             # Store in database
             session = Session()
@@ -646,31 +626,28 @@ def capture_emotion():
                 class_id=class_id,
                 timestamp=datetime.now(),
                 emotion=result['emotion'],
-                confidence=float(result.get('confidence', 0.0)),  # Convert to Python float
-                face_count=int(result.get('face_count', 0)),      # Convert to Python int
+                confidence=float(result.get('confidence', 0.0)),
+                face_count=int(result.get('face_count', 0)),
                 image_path=result.get('image_path', None)
             )
             session.add(new_reading)
             session.commit()
             session.close()
-            
+
             return jsonify({
-                'status': 'success', 
+                'status': 'success',
                 'data': {
                     'emotion': result['emotion'],
-                    'confidence': float(result.get('confidence', 0.0)),  # Convert to Python float
-                    'face_count': int(result.get('face_count', 0)),      # Convert to Python int
+                    'confidence': float(result.get('confidence', 0.0)),
+                    'face_count': int(result.get('face_count', 0)),
                     'image_path': result.get('image_path', None)
                 }
             })
         except Exception as e:
             print(f"Error saving emotion: {str(e)}")
             return jsonify({'status': 'error', 'message': f'Database error: {str(e)}'})
-    
-    if not class_id:
-        return jsonify({'status': 'error', 'message': 'No active class session. Please start a class first.'})
-    else:
-        return jsonify({'status': 'error', 'message': 'Could not detect emotion. Please ensure camera is active and try again.'})
+
+    return jsonify({'status': 'error', 'message': 'Could not detect emotion. Please ensure your face is visible and try again.'})
 
 @app.route('/get_readings/<class_id>', methods=['GET'])
 def get_readings(class_id):
@@ -757,157 +734,11 @@ def continue_class(class_id):
         # Set cookies for the existing class
         response = redirect(url_for('class_view'))
         response.set_cookie('class_id', str(class_id))
-        response.set_cookie('camera_index', '0')
         return response
-        
+
     except Exception as e:
         print(f"Error continuing class: {str(e)}")
         return redirect(url_for('home'))
-
-# Video streaming functions
-class VideoCamera:
-    def __init__(self, camera_index=0):
-        self.camera_index = camera_index
-        self.cap = None
-        self.is_active = False
-        
-    def start(self):
-        """Start the camera stream with optimizations"""
-        try:
-            if self.cap is None or not self.cap.isOpened():
-                print(f"Initializing camera {self.camera_index} with optimized settings...")
-                self.cap = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW)  # Use DirectShow backend on Windows
-                
-                if self.cap.isOpened():
-                    # Set camera properties for better performance and stability
-                    self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-                    self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-                    self.cap.set(cv2.CAP_PROP_FPS, 30)  # Higher FPS for smoother video
-                    self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimal buffer to reduce lag
-                    self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))  # MJPEG codec
-                    
-                    # Quick test to ensure camera is working
-                    ret, test_frame = self.cap.read()
-                    if ret and test_frame is not None:
-                        self.is_active = True
-                        print(f"Camera {self.camera_index} started successfully with DirectShow backend")
-                        print(f"Global camera initialized and started: active={self.is_active}")
-                    else:
-                        print(f"Camera {self.camera_index} opened but cannot capture frames")
-                        self.cap.release()
-                        self.cap = None
-                else:
-                    print(f"Failed to open camera {self.camera_index}")
-        except Exception as e:
-            print(f"Error starting camera {self.camera_index}: {str(e)}")
-            if self.cap:
-                self.cap.release()
-                self.cap = None
-                
-    def stop(self):
-        """Stop the camera stream"""
-        if self.cap is not None:
-            self.cap.release()
-            self.cap = None
-            self.is_active = False
-            print(f"Camera {self.camera_index} stopped")
-    
-    def get_frame(self):
-        """Get a frame from the camera"""
-        if self.cap is not None and self.cap.isOpened():
-            # Clear buffer by reading multiple frames quickly
-            for _ in range(2):
-                ret, frame = self.cap.read()
-                if not ret:
-                    break
-            
-            if ret and frame is not None:
-                # Encode frame as JPEG
-                ret, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
-                if ret:
-                    return jpeg.tobytes()
-        return None
-
-def generate_frames():
-    """Generate video frames for streaming"""
-    global camera
-    while True:
-        if camera and camera.is_active:
-            frame = camera.get_frame()
-            if frame:
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-            else:
-                time.sleep(0.1)
-        else:
-            time.sleep(0.5)
-
-@app.route('/video_feed')
-def video_feed():
-    """Video streaming route"""
-    return Response(generate_frames(),
-                    mimetype='multipart/x-mixed-replace; boundary=frame')
-
-@app.route('/start_camera')
-def start_camera():
-    """Start the camera for the current session"""
-    global camera
-    camera_index = int(request.cookies.get('camera_index', 0))
-    
-    with camera_lock:
-        if camera is None or not camera.is_active:
-            camera = VideoCamera(camera_index)
-            camera.start()
-            print(f"Global camera initialized and started: active={camera.is_active}")
-            return jsonify({'status': 'success', 'message': 'Camera started'})
-        else:
-            print(f"Camera already active: {camera.is_active}")
-            return jsonify({'status': 'info', 'message': 'Camera already active'})
-
-@app.route('/stop_camera')
-def stop_camera():
-    """Stop the camera"""
-    global camera
-    
-    with camera_lock:
-        if camera and camera.is_active:
-            camera.stop()
-            return jsonify({'status': 'success', 'message': 'Camera stopped'})
-        else:
-            return jsonify({'status': 'info', 'message': 'Camera not active'})
-
-@app.route('/camera_status')
-def camera_status():
-    """Get current camera status for debugging"""
-    global camera
-    
-    status = {
-        'camera_exists': camera is not None,
-        'camera_active': camera.is_active if camera else False,
-        'camera_cap_opened': camera.cap.isOpened() if camera and camera.cap else False,
-        'camera_index': camera.camera_index if camera else None,
-        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    }
-    
-    # Test frame capture if camera exists
-    if camera and camera.cap and camera.cap.isOpened():
-        try:
-            ret, frame = camera.cap.read()
-            status['can_capture_frame'] = ret and frame is not None
-            if ret and frame is not None:
-                status['frame_shape'] = f"{frame.shape[1]}x{frame.shape[0]}"
-            else:
-                status['frame_shape'] = None
-        except Exception as e:
-            status['can_capture_frame'] = False
-            status['frame_shape'] = None
-            status['capture_error'] = str(e)
-    else:
-        status['can_capture_frame'] = False
-        status['frame_shape'] = None
-    
-    print(f"Camera status check: {status}")
-    return jsonify(status)
 
 if __name__ == '__main__':
     # Use SQLite file database

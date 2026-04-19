@@ -51,7 +51,8 @@
             </div>
             <div class="card-body p-0">
                 <div class="webcam-container" id="webcam-container">
-                    <img id="webcam-feed" class="webcam-feed" src="{{ url_for('video_feed') }}" alt="Live webcam feed">
+                    <video id="webcam-feed" class="webcam-feed" autoplay playsinline muted></video>
+                    <canvas id="capture-canvas" style="display:none;"></canvas>
                     <div class="emotion-display">
                         <div id="emotion-indicator" class="emotion-indicator"></div>
                         <span id="current-emotion">Ready - Click Capture to Analyze</span>
@@ -220,9 +221,13 @@
         let isAutoCaptureEnabled = false;
         let autoCaptureInterval = null;
         let lastCapturedEmotion = null;
-        
-        // Camera related variables
-        const cameraIndex = "{{ camera_index }}";
+
+        // Camera stream reference
+        let mediaStream = null;
+
+        // Default canvas dimensions (used as fallback when videoWidth/Height are not yet available)
+        const DEFAULT_CANVAS_WIDTH = 640;
+        const DEFAULT_CANVAS_HEIGHT = 480;
         
         // Set up the emotion chart
         const emotionChartCtx = document.getElementById('emotionChart').getContext('2d');
@@ -295,11 +300,28 @@
         
         // Function to capture emotion
         function captureEmotion() {
+            const video = document.getElementById('webcam-feed');
+            const canvas = document.getElementById('capture-canvas');
+
+            if (!mediaStream || !video.srcObject) {
+                showToast('Camera is not active. Please start the camera first.', 'error');
+                return;
+            }
+
             captureButton.disabled = true;
             captureButton.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Capturing...';
-            
+
+            // Draw the current video frame onto the hidden canvas
+            canvas.width = video.videoWidth || DEFAULT_CANVAS_WIDTH;
+            canvas.height = video.videoHeight || DEFAULT_CANVAS_HEIGHT;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const imageData = canvas.toDataURL('image/jpeg', 0.85);
+
             fetch('/capture_emotion', {
-                method: 'POST'
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({image: imageData})
             })
             .then(response => response.json())
             .then(data => {
@@ -307,14 +329,6 @@
                     updateEmotionDisplay(data.data);
                     refreshReadings();
                     showToast('Emotion captured successfully!', 'success');
-                    // Refresh webcam feed to ensure it continues streaming
-                    setTimeout(() => {
-                        const webcamFeed = document.getElementById('webcam-feed');
-                        const currentSrc = webcamFeed.src;
-                        if (currentSrc.includes('video_feed')) {
-                            webcamFeed.src = '/video_feed?' + new Date().getTime();
-                        }
-                    }, 1000);
                 } else {
                     console.error('Error capturing emotion:', data.message);
                     currentEmotion.textContent = 'Error: ' + data.message;
@@ -429,12 +443,7 @@
             const { emotion, confidence, image_path, face_count } = data;
             currentEmotion.textContent = `${emotion} (${confidence.toFixed(1)}%)`;
             emotionIndicator.style.backgroundColor = getEmotionColorHex(emotion);
-            
-            // Update webcam feed if image is available
-            if (image_path) {
-                document.getElementById('webcam-feed').src = `/static/${image_path}?t=${new Date().getTime()}`;
-            }
-            
+
             // Update insight panel
             lastCapturedEmotion = emotion;
             updateEmotionInsight(emotion, face_count);
@@ -514,20 +523,16 @@
         
         refreshButton.addEventListener('click', refreshReadings);
         
-        // Camera control buttons
+        // Camera control buttons — use browser getUserMedia API
         document.getElementById('start-camera-btn').addEventListener('click', function() {
             this.disabled = true;
             this.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-            
-            fetch('/start_camera')
-                .then(response => response.json())
-                .then(data => {
-                    console.log(data.message);
-                    // Refresh the video feed with timestamp to force reload
-                    const webcamFeed = document.getElementById('webcam-feed');
-                    webcamFeed.src = '/video_feed?' + new Date().getTime();
-                    
-                    // Update button
+
+            navigator.mediaDevices.getUserMedia({video: true, audio: false})
+                .then(stream => {
+                    mediaStream = stream;
+                    const video = document.getElementById('webcam-feed');
+                    video.srcObject = stream;
                     this.innerHTML = '<i class="fas fa-check"></i>';
                     setTimeout(() => {
                         this.innerHTML = '<i class="fas fa-play"></i>';
@@ -536,6 +541,7 @@
                 })
                 .catch(error => {
                     console.error('Error starting camera:', error);
+                    showToast('Could not access camera: ' + error.message, 'error');
                     this.innerHTML = '<i class="fas fa-exclamation"></i>';
                     setTimeout(() => {
                         this.innerHTML = '<i class="fas fa-play"></i>';
@@ -543,32 +549,21 @@
                     }, 2000);
                 });
         });
-        
+
         document.getElementById('stop-camera-btn').addEventListener('click', function() {
-            fetch('/stop_camera')
-                .then(response => response.json())
-                .then(data => {
-                    console.log(data.message);
-                    // Show placeholder when camera is stopped
-                    const webcamFeed = document.getElementById('webcam-feed');
-                    webcamFeed.src = '/static/placeholder.jpg';
-                })
-                .catch(error => console.error('Error stopping camera:', error));
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(track => track.stop());
+                mediaStream = null;
+                const video = document.getElementById('webcam-feed');
+                video.srcObject = null;
+                showToast('Camera stopped.', 'info');
+            }
         });
-        
+
         // Camera status check
         document.getElementById('camera-status-btn').addEventListener('click', function() {
-            fetch('/camera_status')
-                .then(response => response.json())
-                .then(data => {
-                    const statusMsg = 'Camera Status:\n• Exists: ' + data.camera_exists + '\n• Active: ' + data.camera_active + '\n• Opened: ' + data.camera_cap_opened;
-                    showToast(statusMsg, 'info', 'Camera Debug');
-                    console.log('Camera status:', data);
-                })
-                .catch(error => {
-                    console.error('Error checking camera status:', error);
-                    showToast('Error checking camera status', 'error');
-                });
+            const active = mediaStream && mediaStream.active;
+            showToast('Camera Status:\n• Active: ' + (active ? 'Yes' : 'No'), 'info', 'Camera Debug');
         });
         
         // Fullscreen toggle
@@ -654,22 +649,6 @@
         setTimeout(() => {
             document.getElementById('start-camera-btn').click();
         }, 1000);
-        
-        // Add loading indicator to webcam feed
-        const webcamFeed = document.getElementById('webcam-feed');
-        webcamFeed.addEventListener('load', function() {
-            console.log('Camera feed loaded successfully');
-        });
-        
-        webcamFeed.addEventListener('error', function() {
-            console.log('Camera feed error - retrying...');
-            // Retry after 2 seconds
-            setTimeout(() => {
-                if (webcamFeed.src.includes('video_feed')) {
-                    webcamFeed.src = '/video_feed?' + new Date().getTime();
-                }
-            }, 2000);
-        });
     });
 </script>
 {% endblock %}
