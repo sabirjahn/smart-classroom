@@ -142,54 +142,66 @@ def detect_emotion_detailed(camera_index=0, use_stream_camera=True):
         
         # Save the original frame
         cv2.imwrite(image_path, frame)
-        
+
         # Analyze emotions using DeepFace
-        result = DeepFace.analyze(frame, actions=['emotion'], enforce_detection=False)
-        
+        try:
+            # enforce_detection=True qilinadi, shunda odam bo'lmasa xato (exception) beradi
+            result = DeepFace.analyze(frame, actions=['emotion'], enforce_detection=True)
+        except ValueError:
+            # Agar yuz topilmasa DeepFace ValueError beradi, shuni ushlaymiz
+            print("Human not available")
+            return {
+                'emotion': 'Human not available',
+                'confidence': 0.0,
+                'face_count': 0,
+                'image_path': image_filename
+            }
+
         # Process results
         emotion_counts = {}
         total_confidence = 0
         face_count = 0
-        
+
         # Handle both single face and multiple faces
         if isinstance(result, list):
             faces = result
         else:
             faces = [result]
-        
+
         face_count = len([face for face in faces if 'emotion' in face])
-        
+
         for face in faces:
             if 'emotion' in face:
                 dominant_emotion = face['dominant_emotion']
                 emotion_counts[dominant_emotion] = emotion_counts.get(dominant_emotion, 0) + 1
-                
+
                 # Get confidence for the dominant emotion
                 if dominant_emotion in face['emotion']:
                     total_confidence += face['emotion'][dominant_emotion]
-        
+
         # Determine the dominant emotion overall
         if emotion_counts:
             dominant_emotion = max(emotion_counts, key=emotion_counts.get)
             avg_confidence = total_confidence / len([f for f in faces if 'emotion' in f]) if faces else 0
-            
-            print(f"Dominant emotion detected: {dominant_emotion} (Confidence: {avg_confidence:.1f}%, Faces: {face_count})")
-            
+
+            print(
+                f"Dominant emotion detected: {dominant_emotion} (Confidence: {avg_confidence:.1f}%, Faces: {face_count})")
+
             return {
                 'emotion': dominant_emotion,
                 'confidence': float(avg_confidence),  # Convert numpy float to Python float
-                'face_count': int(face_count),        # Convert to Python int
+                'face_count': int(face_count),  # Convert to Python int
                 'image_path': image_filename  # Return relative path for static serving
             }
         else:
-            print("No emotions detected")
+            print("Human not available")
             return {
-                'emotion': 'neutral',
-                'confidence': float(0.0),  # Ensure Python float
-                'face_count': int(0),      # Ensure Python int
+                'emotion': 'Human not available',
+                'confidence': 0.0,
+                'face_count': 0,
                 'image_path': image_filename
             }
-            
+
     except Exception as e:
         print(f"Error in detailed emotion detection: {str(e)}")
         return None
@@ -211,7 +223,9 @@ def get_emotion_color(emotion):
         'fear': (255, 0, 255),     # Magenta
         'surprise': (0, 255, 0),   # Green
         'neutral': (255, 255, 255), # White
-        'disgust': (0, 165, 255)   # Orange
+        'disgust': (0, 165, 255),   # Orange
+        'Human not available': (128, 128, 128),  # Gray for no human
+        'human not available': (128, 128, 128)  # Gray (lowercase fallback)
     }
     
     return emotion_colors.get(emotion, (200, 200, 200))  # Default gray
