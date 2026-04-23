@@ -1,113 +1,82 @@
-# Smart Classroom
 
-An intelligent classroom system that uses emotion recognition to monitor student engagement during classes.
+# Smart Classroom Monitoring System 🎓☁️
 
-## Overview
+![Python](https://img.shields.io/badge/Python-3.10-blue)
+![Docker](https://img.shields.io/badge/Docker-Enabled-blue)
+![Azure](https://img.shields.io/badge/Deployment-Microsoft_Azure-blue)
+![AI](https://img.shields.io/badge/AI-DeepFace-orange)
+![CI/CD](https://img.shields.io/badge/CI%2FCD-GitHub_Actions-brightgreen)
 
-Smart Classroom is a Flask-based web application that enables teachers to monitor student emotions in real-time using computer vision. The system captures emotions through webcams and provides insights to help teachers adapt their teaching methods based on student engagement.
+A cloud-native, AI-powered web application designed to analyze student engagement, attention, and emotional states in real-time using computer vision.
 
-## Features
+## 🏗️ Architecture
 
-- **Real-time Emotion Detection**: Analyze student facial expressions to determine emotional states during class
-- **Camera Selection**: Choose which camera to use for emotion detection
-- **Advanced Analytics**: Visualize emotion trends and patterns throughout the session
-- **Teaching Insights**: Receive actionable suggestions based on detected emotions
-- **Student Management**: Track student attendance and participation
-- **Emotion Timeline**: See how emotions change during the class period
-- **Image Capture**: Review captured images for each emotion reading
-- **Multi-face Detection**: Count how many students are detected in each capture
-- **Class Notes**: Add notes and summaries for each class session
-- **SQLite Database**: Local storage without installation requirements
+Unlike traditional local scripts, this project is fully architected for the Cloud (PaaS):
+- **Frontend Engine**: HTML5, JS (Uses WebRTC API to capture local webcam frames, bypassing cloud hardware limitations).
+- **Backend API**: Python (Flask / Gunicorn) processes Base64 encoded video frames.
+- **AI Core**: DeepFace (CNN models) extracts emotional states and face counts.
+- **Infrastructure**: Containerized with Docker, automated via GitHub Actions, and hosted on Microsoft Azure Web App for Containers.
+- **Security**: Routed via Cloudflare with strict HTTPS encryption.
 
-## Technology Stack
+## ✨ Key Features
 
-- **Backend**: Python, Flask
-- **Frontend**: Bootstrap 5, Chart.js
-- **Database**: SQLite with SQLAlchemy
-- **Computer Vision**: OpenCV, DeepFace
-- **UI Components**: Font Awesome, Custom CSS
+- **Real-time Emotion Detection**: Analyzes facial expressions instantly via client-side WebRTC cameras.
+- **Cloud-Native & Containerized**: Fully reproducible environment using Docker and `docker-compose`.
+- **CI/CD Pipeline**: Automated builds and deployments to Azure via GitHub Actions.
+- **Advanced Analytics**: Visualizes emotion trends and dominant classroom moods on a dynamic dashboard.
+- **SQLite Database**: Lightweight, container-volume-mapped database for session persistence.
 
-## Setup and Installation
+## 🚀 Getting Started (Docker - Recommended)
 
+The easiest way to run this project is using Docker.
+
+### Prerequisites
+- [Docker](https://www.docker.com/) and Docker Compose installed on your machine.
+
+### Installation
 1. Clone the repository:
-   ```
+   ```bash
    git clone https://github.com/sabirjahn/smart-classroom.git
    cd smart-classroom
    ```
 
-2. Set up a virtual environment (recommended):
+2. Build and start the container:
+   ```bash
+   docker-compose up --build -d
    ```
+
+3. Access the application:
+   Open your browser and navigate to `http://localhost:5000`
+
+## 💻 Manual Local Setup (Without Docker)
+
+If you prefer to run it without Docker:
+
+1. Clone the repository and set up a virtual environment:
+   ```bash
    python -m venv venv
    source venv/bin/activate   # On Windows: venv\Scripts\activate
    ```
 
-3. Install the requirements:
-   ```
+2. Install the requirements:
+   ```bash
    pip install -r requirements.txt
    ```
 
-4. Initialize the database (only needed first time):
-   ```
-   python db_setup.py
-   ```
-
-5. Run the application:
-   ```
+3. Run the application:
+   ```bash
    python app.py
    ```
 
-## Troubleshooting Database Issues
+## ☁️ Cloud Deployment (CI/CD)
 
-If you encounter database access errors:
+This repository is configured with a fully automated CI/CD pipeline using **GitHub Actions** (`.github/workflows/deploy.yml`). 
 
-1. Make sure the `instance` directory exists and has proper permissions:
-   ```
-   mkdir -p instance
-   chmod 777 instance
-   ```
+Any push to the `main` branch automatically:
+1. Builds the Docker image.
+2. Pushes the updated image to **GitHub Container Registry (GHCR)**.
+3. Triggers an Azure Webhook to pull the latest image and seamlessly restart the production container on Microsoft Azure.
 
-2. Run the database setup script:
-   ```
-   python db_setup.py
-   ```
+## 📝 License
 
-3. Check the console output for the database path and make sure it's accessible.
-
-## Usage Guide
-
-1. **Starting a Class**: 
-   - Enter your teacher ID and subject name
-   - Select your preferred camera
-   - Click "Start Class"
-
-2. **Capturing Emotions**:
-   - Click "Capture Emotion" to take a snapshot
-   - Enable "Auto-Capture" for periodic readings
-   - View real-time emotional insights
-
-3. **Analytics Dashboard**:
-   - View emotion distribution charts
-   - See emotion timeline throughout the class
-   - Get teaching suggestions based on predominant emotions
-
-4. **Student Management**:
-   - Add students to the system
-   - Track attendance for each class
-   - View attendance statistics
-
-## Key Directories and Files
-
-- `/app.py` - Main application file
-- `/emotions.py` - Emotion detection module
-- `/db_setup.py` - Database initialization
-- `/static/` - CSS and captured images
-- `/templates/` - HTML templates
-- `/instance/` - SQLite database
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the MIT License.
